@@ -2,6 +2,7 @@ package main
 
 import (
   "bufio"
+  "encoding/base64"
   "encoding/json"
   "fmt"
   "github.com/dworznik/bitwire"
@@ -75,12 +76,20 @@ func readConfig(mode bitwire.Mode) (bitwire.Config, error) {
     if err != nil {
       return config, err
     } else {
-      return config, nil
+      pass, err := base64.StdEncoding.DecodeString(config.Password)
+      if err != nil {
+        return bitwire.Config{}, err
+      } else {
+        config.Password = string(pass)
+        return config, nil
+      }
     }
   }
 }
 
 func writeConfig(config bitwire.Config, mode bitwire.Mode) error {
+  pass := base64.StdEncoding.EncodeToString([]byte(config.Password))
+  config.Password = pass
   configDir := configDir()
   configPath := configPath(mode)
   err := os.Mkdir(configDir, 0777)

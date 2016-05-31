@@ -1,6 +1,7 @@
 package bitwire
 
 import (
+  "encoding/base64"
   "encoding/json"
   "fmt"
   "github.com/stretchr/testify/assert"
@@ -106,7 +107,13 @@ func readConfig() Config {
     if err != nil {
       panic(err)
     } else {
-      return config
+      pass, err := base64.StdEncoding.DecodeString(config.Password)
+      if err != nil {
+        panic(err)
+      } else {
+        config.Password = string(pass)
+        return config
+      }
     }
   }
 }
