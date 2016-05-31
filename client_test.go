@@ -49,17 +49,18 @@ func TestBanks(t *testing.T) {
 }
 
 func TestToken(t *testing.T) {
-  client, _ := New(PRODUCTION)
+  client, _ := New(SANDBOX)
   config := readConfig()
   creds := Credentials{Config: config, GrantType: "password"}
   token, err := client.GetToken(creds)
   fmt.Println(token)
   assert.Nil(t, err)
   assert.NotNil(t, token)
+  assert.NotNil(t, token.AccessToken)
 }
 
 func TestAuthenticate(t *testing.T) {
-  client, _ := New(PRODUCTION)
+  client, _ := New(SANDBOX)
   config := readConfig()
   creds := Credentials{Config: config, GrantType: "password"}
   ok, err := client.Authenticate(creds)
@@ -68,7 +69,7 @@ func TestAuthenticate(t *testing.T) {
 }
 
 func TestTransfers(t *testing.T) {
-  client, _ := New(PRODUCTION)
+  client, _ := New(SANDBOX)
   config := readConfig()
   creds := Credentials{Config: config, GrantType: "password"}
   client.Authenticate(creds)
@@ -78,7 +79,7 @@ func TestTransfers(t *testing.T) {
 }
 
 func TestLimits(t *testing.T) {
-  client, _ := New(PRODUCTION)
+  client, _ := New(SANDBOX)
   config := readConfig()
   creds := Credentials{Config: config, GrantType: "password"}
   client.Authenticate(creds)
@@ -88,7 +89,7 @@ func TestLimits(t *testing.T) {
 }
 
 func TestRecipients(t *testing.T) {
-  client, _ := New(PRODUCTION)
+  client, _ := New(SANDBOX)
   config := readConfig()
   creds := Credentials{Config: config, GrantType: "password"}
   client.Authenticate(creds)
@@ -97,8 +98,20 @@ func TestRecipients(t *testing.T) {
   assert.NotEmpty(t, recipients)
 }
 
+func TestRefreshToken(t *testing.T) {
+  client, _ := New(SANDBOX)
+  config := readConfig()
+  creds := Credentials{Config: config, GrantType: "password"}
+  token, err := client.GetToken(creds)
+  newToken, err := client.RefreshToken(creds, token)
+  assert.Nil(t, err)
+  assert.NotNil(t, newToken)
+  assert.NotNil(t, newToken.AccessToken)
+  assert.NotEqual(t, token.AccessToken, newToken.AccessToken)
+}
+
 func readConfig() Config {
-  data, err := ioutil.ReadFile("./test_production.conf")
+  data, err := ioutil.ReadFile("./test_sandbox.conf")
   if err != nil {
     panic(err)
   } else {
