@@ -5,6 +5,7 @@ import (
   "fmt"
   "github.com/dghubble/sling"
   "net/http"
+  "time"
 )
 
 const baseURL = "https://www.bitwire.co/api/v1/"
@@ -150,6 +151,7 @@ type Token struct {
   AccessToken  string `json:"access_token"`
   RefreshToken string `json:"refresh_token"`
   ExpiresIn    int    `json:"expires_in"`
+  ValidUntil   int64  `json:"valid_until"`
 }
 
 type Mode string
@@ -283,6 +285,28 @@ func (c *Client) GetLimits() (Limits, error) {
 func (c *Client) GetToken(credentials Credentials) (Token, error) {
   tokenRes := new(TokenRes)
   res, err := c.http().Post("oauth/tokens").BodyForm(credentials).Receive(tokenRes, nil)
+  if apiErr := check(res, err); apiErr != nil {
+    return Token{}, apiErr
+  } else {
+    token := tokenRes.Token
+    token.ValidUntil = int64(token.ExpiresIn) + time.Now().Unix()
+    return token, nil
+  }
+}
+
+func (c *Client) TokenAuthenticate(credentials Credentials, token Token) (bool, error) {
+  return c.Authenticate(credentials)
+}
+
+func (c *Client) RefreshToken(credentials Credentials, token Token) (Token, error) {
+  tokenRes := new(TokenRes)
+  req := struct {
+    ClientId     string `url:"client_id"`
+    ClientSecret string `url:"client_secret"`
+    RefreshToken string `url:"refresh_token"`
+    GrantType    string `url:"grant_type"`
+  }{credentials.ClientId, credentials.ClientSecret, token.RefreshToken, "refresh_token"}
+  res, err := c.http().Post("oauth/tokens").BodyForm(req).Receive(tokenRes, nil)
   if apiErr := check(res, err); apiErr != nil {
     return Token{}, apiErr
   } else {
