@@ -2,9 +2,7 @@ package bitwire
 
 import (
   "errors"
-  "fmt"
   "github.com/dghubble/sling"
-  "net/http"
   "time"
 )
 
@@ -13,6 +11,16 @@ const sandboxBaseURL = "https://sandbox.bitwire.co/api/v1/"
 
 type Res struct {
   Code int `json:"code"`
+}
+
+type ErrorRes struct {
+  Res
+  Error
+}
+
+type Error struct {
+  Message   string `json:"message"`
+  ErrorType string `json:"errorType"`
 }
 
 type AllRatesRes struct {
@@ -179,9 +187,20 @@ type Client struct {
   token Token
 }
 
+type Method string
+
+const (
+  GET  Method = "GET"
+  POST Method = "POST"
+)
+
 func New(mode Mode) (*Client, error) {
+  return NewWithToken(mode, Token{})
+}
+
+func NewWithToken(mode Mode, token Token) (*Client, error) {
   if mode == SANDBOX || mode == PRODUCTION {
-    return &Client{mode, Token{}}, nil
+    return &Client{mode, token}, nil
   } else {
     return nil, errors.New("Invalid mode")
   }
@@ -196,10 +215,35 @@ func (c *Client) http() *sling.Sling {
   }
 }
 
+func callApi(method Method, path string, params interface{}, c *Client, auth bool, res interface{}) error {
+  var req *sling.Sling
+  errorRes := new(ErrorRes)
+  switch method {
+  case POST:
+    req = c.http().Post(path)
+  default:
+    req = c.http().Get(path)
+  }
+  if auth {
+    req.Set("Authorization", "Bearer "+c.token.AccessToken)
+  }
+  if params != nil {
+    req = req.BodyForm(params)
+  }
+
+  _, httpErr := req.Receive(res, errorRes)
+  if httpErr != nil {
+    return httpErr
+  } else if *errorRes != (ErrorRes{}) {
+    return errors.New(errorRes.ErrorType + ": " + errorRes.Message)
+  } else {
+    return nil
+  }
+}
+
 func (c *Client) GetAllRates() (AllRates, error) {
   ratesRes := new(AllRatesRes)
-  fmt.Println("Fetching all rates")
-  _, err := c.http().Get("rates").Receive(ratesRes, nil)
+  err := callApi(GET, "rates", nil, c, false, ratesRes)
   if err != nil {
     return AllRates{}, err
   } else {
@@ -209,8 +253,7 @@ func (c *Client) GetAllRates() (AllRates, error) {
 
 func (c *Client) GetFxRates() (Rates, error) {
   ratesRes := new(FxRatesRes)
-  fmt.Println("Fetching FX rates")
-  _, err := c.http().Get("rates/fx").Receive(ratesRes, nil)
+  err := callApi(GET, "rates/fx", nil, c, false, ratesRes)
   if err != nil {
     return nil, err
   } else {
@@ -220,8 +263,7 @@ func (c *Client) GetFxRates() (Rates, error) {
 
 func (c *Client) GetBtcRates() (Rates, error) {
   ratesRes := new(BtcRatesRes)
-  fmt.Println("Fetching BTC rates")
-  _, err := c.http().Get("rates/btc").Receive(ratesRes, nil)
+  err := callApi(GET, "rates/btc", nil, c, false, ratesRes)
   if err != nil {
     return nil, err
   } else {
@@ -231,8 +273,7 @@ func (c *Client) GetBtcRates() (Rates, error) {
 
 func (c *Client) GetBanks() ([]Bank, error) {
   banksRes := new(BanksRes)
-  fmt.Println("Fetching banks")
-  _, err := c.http().Get("banks").Receive(banksRes, nil)
+  err := callApi(GET, "banks", nil, c, false, banksRes)
   if err != nil {
     return nil, err
   } else {
@@ -242,13 +283,9 @@ func (c *Client) GetBanks() ([]Bank, error) {
 
 func (c *Client) GetRecipients() ([]Recipient, error) {
   recipientsRes := new(RecipientsRes)
-  req := c.http().Get("recipients")
-  if c.token != (Token{}) {
-    req.Set("Authorization", "Bearer "+c.token.AccessToken)
-  }
-  res, err := req.Body(nil).Receive(recipientsRes, nil)
-  if apiErr := check(res, err); apiErr != nil {
-    return nil, apiErr
+  err := callApi(GET, "recipients", nil, c, true, recipientsRes)
+  if err != nil {
+    return nil, err
   } else {
     return recipientsRes.Recipients, nil
   }
@@ -256,13 +293,9 @@ func (c *Client) GetRecipients() ([]Recipient, error) {
 
 func (c *Client) GetTransfers() ([]Transfer, error) {
   transfersRes := new(TransfersRes)
-  req := c.http().Get("transfers")
-  if c.token != (Token{}) {
-    req.Set("Authorization", "Bearer "+c.token.AccessToken)
-  }
-  res, err := req.Body(nil).Receive(transfersRes, nil)
-  if apiErr := check(res, err); apiErr != nil {
-    return nil, apiErr
+  err := callApi(GET, "transfers", nil, c, true, transfersRes)
+  if err != nil {
+    return nil, err
   } else {
     return transfersRes.Transfers, nil
   }
@@ -270,13 +303,9 @@ func (c *Client) GetTransfers() ([]Transfer, error) {
 
 func (c *Client) GetLimits() (Limits, error) {
   limitsRes := new(LimitsRes)
-  req := c.http().Get("users/limits")
-  if c.token != (Token{}) {
-    req.Set("Authorization", "Bearer "+c.token.AccessToken)
-  }
-  res, err := req.Body(nil).Receive(limitsRes, nil)
-  if apiErr := check(res, err); apiErr != nil {
-    return Limits{}, apiErr
+  err := callApi(GET, "users/limits", nil, c, true, limitsRes)
+  if err != nil {
+    return Limits{}, err
   } else {
     return limitsRes.Limits, nil
   }
@@ -284,9 +313,9 @@ func (c *Client) GetLimits() (Limits, error) {
 
 func (c *Client) GetToken(credentials Credentials) (Token, error) {
   tokenRes := new(TokenRes)
-  res, err := c.http().Post("oauth/tokens").BodyForm(credentials).Receive(tokenRes, nil)
-  if apiErr := check(res, err); apiErr != nil {
-    return Token{}, apiErr
+  err := callApi(POST, "oauth/tokens", credentials, c, false, tokenRes)
+  if err != nil {
+    return Token{}, err
   } else {
     token := tokenRes.Token
     token.ValidUntil = int64(token.ExpiresIn) + time.Now().Unix()
@@ -306,9 +335,9 @@ func (c *Client) RefreshToken(credentials Credentials, token Token) (Token, erro
     RefreshToken string `url:"refresh_token"`
     GrantType    string `url:"grant_type"`
   }{credentials.ClientId, credentials.ClientSecret, token.RefreshToken, "refresh_token"}
-  res, err := c.http().Post("oauth/tokens").BodyForm(req).Receive(tokenRes, nil)
-  if apiErr := check(res, err); apiErr != nil {
-    return Token{}, apiErr
+  err := callApi(POST, "oauth/tokens", req, c, false, tokenRes)
+  if err != nil {
+    return Token{}, err
   } else {
     return tokenRes.Token, nil
   }
@@ -321,15 +350,5 @@ func (c *Client) Authenticate(credentials Credentials) (bool, error) {
   } else {
     c.token = token
     return true, nil
-  }
-}
-
-func check(res *http.Response, err error) error {
-  if err != nil {
-    return err
-  } else if res.StatusCode != 200 {
-    return errors.New(fmt.Sprintf("HTTP status: %d", res.StatusCode))
-  } else {
-    return nil
   }
 }

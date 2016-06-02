@@ -7,6 +7,7 @@ import (
   "github.com/stretchr/testify/assert"
   "io/ioutil"
   "testing"
+  "time"
 )
 
 func TestClient(t *testing.T) {
@@ -86,6 +87,19 @@ func TestLimits(t *testing.T) {
   limits, err := client.GetLimits()
   assert.Nil(t, err)
   assert.NotEmpty(t, limits)
+}
+
+func TestLimitsAuthFailed(t *testing.T) {
+  token := Token{"Bearer",
+    "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VyIjo5MSwibGV2ZWwiOjEsImVtYWlsIjoiZHd1eml1QGJ6aXVtLm5ldCIsImp0aSI6IjBQR1kyOEdtaEE3cjBUR1RYb3AwRzBjb3RmemU2aTd0IiwiaWF0IjoxNDY0Njc5ODIzLCJleHAiOjE0NjQ2ODM0MjMsImlzcyI6Imh0dHBzOi8vd3d3LmJpdHdpcmUuY28vYXBpL3YxL29hdXRoIn0.NE9gjpcaQimsTjyaWQncmJ67c6rdzlvFlaR12lskgWw",
+    "xxx",
+    3600,
+    time.Now().Unix() + 3600,
+  }
+  client, _ := NewWithToken(SANDBOX, token)
+  _, err := client.GetLimits()
+  assert.NotNil(t, err)
+  assert.Equal(t, err.Error(), "Unauthorized: Invalid token.")
 }
 
 func TestRecipients(t *testing.T) {
