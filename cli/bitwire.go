@@ -2,7 +2,6 @@ package main
 
 import (
   "bufio"
-  "encoding/base64"
   "encoding/json"
   "fmt"
   "github.com/dworznik/bitwire"
@@ -51,7 +50,7 @@ func readStdin(reader *bufio.Reader) (string, error) {
   }
 }
 
-func config(mode bitwire.Mode) (bitwire.Config, error) {
+func config(mode bitwire.Mode) (bitwire.Config, bitwire.LoginCredentials, error) {
   fmt.Printf("Configuring bitwire in %s mode\n", mode)
   reader := bufio.NewReader(os.Stdin)
   fmt.Print("Username: ")
@@ -62,8 +61,11 @@ func config(mode bitwire.Mode) (bitwire.Config, error) {
   clientId, _ := readStdin(reader)
   fmt.Print("Client secret: ")
   clientSecret, _ := readStdin(reader)
-  conf := bitwire.Config{mode, username, password, clientId, clientSecret}
-  return conf, nil
+  tokenCreds := bitwire.Credentials{clientId, clientSecret, "refresh_token"}
+  passwordCreds := bitwire.Credentials{clientId, clientSecret, "password"}
+  conf := bitwire.Config{tokenCreds, bitwire.Token{}}
+  login := bitwire.LoginCredentials{passwordCreds, username, password}
+  return conf, login, nil
 }
 
 func readConfig(mode bitwire.Mode) (bitwire.Config, error) {
@@ -76,20 +78,12 @@ func readConfig(mode bitwire.Mode) (bitwire.Config, error) {
     if err != nil {
       return config, err
     } else {
-      pass, err := base64.StdEncoding.DecodeString(config.Password)
-      if err != nil {
-        return bitwire.Config{}, err
-      } else {
-        config.Password = string(pass)
-        return config, nil
-      }
+      return config, nil
     }
   }
 }
 
 func writeConfig(config bitwire.Config, mode bitwire.Mode) error {
-  pass := base64.StdEncoding.EncodeToString([]byte(config.Password))
-  config.Password = pass
   configDir := configDir()
   configPath := configPath(mode)
   err := os.Mkdir(configDir, 0777)
@@ -139,13 +133,26 @@ func printOut(v interface{}, format string) error {
 }
 
 func main() {
+  var exit error
+
+  defer func() {
+    if exit != nil {
+      fmt.Fprintln(os.Stderr, exit)
+      if exit.Error() == "Unauthorized: Token expired." {
+        fmt.Fprintln(os.Stderr, "API token could not been refreshed. Run bitwire config again")
+      }
+      os.Exit(1)
+    }
+  }()
+
   authCommands := map[string]bool{"transfers": true, "limits": true, "recipients": true}
   sandbox := false
   mode := bitwire.PRODUCTION
   var format string
 
   var confErr error
-  var conf bitwire.Config
+  var conf bitwire.Config    // Set in app.Before()
+  var client *bitwire.Client // Set in newClient()
 
   app := cli.NewApp()
   app.Name = "bitwire"
@@ -165,40 +172,37 @@ func main() {
     },
   }
 
-  client := func(cmd string) (*bitwire.Client, error) {
+  // newClient creates a new bitwire client for running a client
+  // Returns an error if the command requires authentication and it cannot read credentials from the config file
+  newClient := func(cmd string) (*bitwire.Client, error) {
     if authCommands[cmd] {
       if conf != (bitwire.Config{}) {
-        client, err := bitwire.New(mode)
+        c, err := bitwire.NewFromConfig(mode, conf)
         if err != nil {
           return nil, cli.NewExitError(err.Error(), 1)
         } else {
-          ok, err := client.Authenticate(bitwire.Credentials{Config: conf, GrantType: "password"})
-          if err != nil {
-            return nil, cli.NewExitError(err.Error(), 1)
-          } else if ok {
-            return client, nil
-          } else {
-            return nil, cli.NewExitError("Authentication failed", 1)
-          }
+          client = c
+          return client, nil
         }
       } else {
         if confErr != nil {
           return nil, cli.NewExitError(confErr.Error(), 1)
         } else {
-          return nil, cli.NewExitError("API authorization error", 1)
+          return nil, cli.NewExitError("Configuration error", 1)
         }
       }
     } else {
-      client, err := bitwire.New(mode)
+      c, err := bitwire.New(mode)
       if err != nil {
         return nil, cli.NewExitError(err.Error(), 1)
       } else {
+        client = c
         return client, nil
       }
     }
   }
 
-  app.Before = func(c *cli.Context) error {
+  app.Before = func(c *cli.Context) error { // Read config from the file before running a command
     if sandbox {
       mode = bitwire.SANDBOX
       fmt.Println("Running in sandbox mode")
@@ -206,6 +210,16 @@ func main() {
       fmt.Println("Running in production mode")
     }
     conf, confErr = readConfig(mode)
+    return nil
+  }
+
+  app.After = func(c *cli.Context) error {
+    if client != nil {
+      if client.Token().AccessToken != "" && conf.Token.AccessToken != client.Token().AccessToken { // Update token in the config file
+        conf.Token = client.Token()
+        return writeConfig(conf, mode)
+      }
+    }
     return nil
   }
 
@@ -228,10 +242,20 @@ func main() {
       Name:  "config",
       Usage: "configure Bitwire API access",
       Action: func(c *cli.Context) error {
-        conf, err := config(mode)
-        if err != nil {
-          return cli.NewExitError(err.Error(), 1)
+        client, err := newClient(c.Command.Name)
+        if exit = err; err != nil {
+          return err
+        }
+        conf, login, err := config(mode)
+        if exit = err; err != nil {
+          return err
+        }
+        token, err := client.Authenticate(login)
+        if exit = err; err != nil {
+          return err
         } else {
+          conf.Token = token
+          defer fmt.Println("Configuration saved")
           return writeConfig(conf, mode)
         }
       },
@@ -240,12 +264,12 @@ func main() {
       Name:  "rates",
       Usage: "list current rates",
       Action: func(c *cli.Context) error {
-        client, err := client(c.Command.Name)
-        if err != nil {
+        client, err := newClient(c.Command.Name)
+        if exit = err; err != nil {
           return err
         } else {
           rates, err := client.GetAllRates()
-          if err != nil {
+          if exit = err; err != nil {
             return err
           } else {
             printOut(rates, format)
@@ -258,12 +282,12 @@ func main() {
       Name:  "banks",
       Usage: "list banks",
       Action: func(c *cli.Context) error {
-        client, err := client(c.Command.Name)
-        if err != nil {
+        client, err := newClient(c.Command.Name)
+        if exit = err; err != nil {
           return err
         } else {
           banks, err := client.GetBanks()
-          if err != nil {
+          if exit = err; err != nil {
             return err
           } else {
             printOut(banks, format)
@@ -276,12 +300,12 @@ func main() {
       Name:  "recipients",
       Usage: "list recipients",
       Action: func(c *cli.Context) error {
-        client, err := client(c.Command.Name)
-        if err != nil {
+        client, err := newClient(c.Command.Name)
+        if exit = err; err != nil {
           return err
         } else {
           recipients, err := client.GetRecipients()
-          if err != nil {
+          if exit = err; err != nil {
             return err
           } else {
             printOut(recipients, format)
@@ -294,12 +318,12 @@ func main() {
       Name:  "transfers",
       Usage: "list transfers",
       Action: func(c *cli.Context) error {
-        client, err := client(c.Command.Name)
-        if err != nil {
+        client, err := newClient(c.Command.Name)
+        if exit = err; err != nil {
           return err
         } else {
           txs, err := client.GetTransfers()
-          if err != nil {
+          if exit = err; err != nil {
             return err
           } else {
             printOut(txs, format)
@@ -312,12 +336,12 @@ func main() {
       Name:  "limits",
       Usage: "list limits",
       Action: func(c *cli.Context) error {
-        client, err := client(c.Command.Name)
-        if err != nil {
+        client, err := newClient(c.Command.Name)
+        if exit = err; err != nil {
           return err
         } else {
           limits, err := client.GetLimits()
-          if err != nil {
+          if exit = err; err != nil {
             return err
           } else {
             printOut(limits, format)

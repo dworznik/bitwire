@@ -169,22 +169,32 @@ const (
   SANDBOX    Mode = "sandbox"
 )
 
-type Config struct {
-  Mode         Mode   `json:"mode"`
-  Username     string `json:"username" url:"username"`
-  Password     string `json:"password" url:"password"`
+type Credentials struct {
   ClientId     string `json:"client_id" url:"client_id"`
   ClientSecret string `json:"client_secret" url:"client_secret"`
+  GrantType    string `json:"grant_type" url:"grant_type"`
 }
 
-type Credentials struct {
-  Config
-  GrantType string `url:"grant_type"`
+type LoginCredentials struct {
+  Credentials
+  Username string `url:"username"`
+  Password string `url:"password"`
+}
+
+type TokenCredentials struct {
+  Credentials
+  RefreshToken string `json:"refresh_token" url:"refresh_token"`
+}
+
+type Config struct {
+  Credentials
+  Token Token `json:"token"`
 }
 
 type Client struct {
-  Mode  Mode
-  token Token
+  Mode        Mode
+  token       Token
+  credentials Credentials
 }
 
 type Method string
@@ -200,12 +210,31 @@ func New(mode Mode) (*Client, error) {
 
 func NewWithToken(mode Mode, token Token) (*Client, error) {
   if mode == SANDBOX || mode == PRODUCTION {
-    return &Client{mode, token}, nil
+    return &Client{mode, token, Credentials{}}, nil
   } else {
     return nil, errors.New("Invalid mode")
   }
 }
 
+// Expects token and api client credentials in the config file
+// so that the client can:
+//  - execute an authenticated API method using thetoken
+//  - refresh the token sending client_id, client_secret and refresh_token - TokenCredentials
+//  https://developers.bitwire.co/api/v1/#refresh-token
+func NewFromConfig(mode Mode, config Config) (*Client, error) {
+  if mode == SANDBOX || mode == PRODUCTION {
+    return &Client{mode, config.Token, config.Credentials}, nil
+  } else {
+    return nil, errors.New("Invalid mode")
+  }
+}
+
+// Returns the token
+func (c *Client) Token() Token {
+  return c.token
+}
+
+// Returns a Sling http clients configured with the base URL path
 func (c *Client) http() *sling.Sling {
   switch c.Mode {
   case SANDBOX:
@@ -215,6 +244,24 @@ func (c *Client) http() *sling.Sling {
   }
 }
 
+// Refreshes the token if it expires
+func checkToken(c *Client) error {
+  if c.token == (Token{}) {
+    return errors.New("Missing auth token")
+  }
+  now := time.Now().Unix()
+  if now >= c.token.ValidUntil-30 {
+    _, err := c.RefreshToken()
+    if err != nil {
+      return err
+    }
+  }
+  return nil
+}
+
+// General function for calling API method
+// - sets auth headers
+// - refreshes the token if necessary and parses error responses
 func callApi(method Method, path string, params interface{}, c *Client, auth bool, res interface{}) error {
   var req *sling.Sling
   errorRes := new(ErrorRes)
@@ -225,6 +272,10 @@ func callApi(method Method, path string, params interface{}, c *Client, auth boo
     req = c.http().Get(path)
   }
   if auth {
+    err := checkToken(c)
+    if err != nil {
+      return err
+    }
     req.Set("Authorization", "Bearer "+c.token.AccessToken)
   }
   if params != nil {
@@ -311,7 +362,9 @@ func (c *Client) GetLimits() (Limits, error) {
   }
 }
 
-func (c *Client) GetToken(credentials Credentials) (Token, error) {
+// Calls direct auth method with username and password
+// https://developers.bitwire.co/api/v1/#direct-authentication
+func getToken(c *Client, credentials LoginCredentials) (Token, error) {
   tokenRes := new(TokenRes)
   err := callApi(POST, "oauth/tokens", credentials, c, false, tokenRes)
   if err != nil {
@@ -323,32 +376,39 @@ func (c *Client) GetToken(credentials Credentials) (Token, error) {
   }
 }
 
-func (c *Client) TokenAuthenticate(credentials Credentials, token Token) (bool, error) {
+func (c *Client) TokenAuthenticate(credentials LoginCredentials, token Token) (Token, error) {
   return c.Authenticate(credentials)
 }
 
-func (c *Client) RefreshToken(credentials Credentials, token Token) (Token, error) {
+// https://developers.bitwire.co/api/v1/#refresh-token
+func refreshToken(c *Client, credentials TokenCredentials) (Token, error) {
   tokenRes := new(TokenRes)
-  req := struct {
-    ClientId     string `url:"client_id"`
-    ClientSecret string `url:"client_secret"`
-    RefreshToken string `url:"refresh_token"`
-    GrantType    string `url:"grant_type"`
-  }{credentials.ClientId, credentials.ClientSecret, token.RefreshToken, "refresh_token"}
-  err := callApi(POST, "oauth/tokens", req, c, false, tokenRes)
+  err := callApi(POST, "oauth/tokens", credentials, c, false, tokenRes)
   if err != nil {
     return Token{}, err
   } else {
-    return tokenRes.Token, nil
+    token := tokenRes.Token
+    token.ValidUntil = int64(token.ExpiresIn) + time.Now().Unix()
+    return token, nil
   }
 }
 
-func (c *Client) Authenticate(credentials Credentials) (bool, error) {
-  token, err := c.GetToken(credentials)
-  if err != nil {
-    return false, err
-  } else {
+func (c *Client) RefreshToken() (Token, error) {
+  creds := TokenCredentials{c.credentials, c.token.RefreshToken}
+  token, err := refreshToken(c, creds)
+  if err == nil {
     c.token = token
-    return true, nil
+  }
+  return token, err
+}
+
+func (c *Client) Authenticate(credentials LoginCredentials) (Token, error) {
+  token, err := getToken(c, credentials)
+  if err != nil {
+    return Token{}, err
+  } else {
+    c.credentials = Credentials{credentials.ClientId, credentials.ClientSecret, "refresh_token"}
+    c.token = token
+    return token, nil
   }
 }

@@ -49,30 +49,17 @@ func TestBanks(t *testing.T) {
   assert.NotEmpty(t, banks)
 }
 
-func TestToken(t *testing.T) {
-  client, _ := New(SANDBOX)
-  config := readConfig()
-  creds := Credentials{Config: config, GrantType: "password"}
-  token, err := client.GetToken(creds)
-  fmt.Println(token)
-  assert.Nil(t, err)
-  assert.NotNil(t, token)
-  assert.NotNil(t, token.AccessToken)
-}
-
 func TestAuthenticate(t *testing.T) {
   client, _ := New(SANDBOX)
-  config := readConfig()
-  creds := Credentials{Config: config, GrantType: "password"}
+  creds := readCredentials()
   ok, err := client.Authenticate(creds)
   assert.Nil(t, err)
-  assert.True(t, ok)
+  assert.NotNil(t, ok)
 }
 
 func TestTransfers(t *testing.T) {
   client, _ := New(SANDBOX)
-  config := readConfig()
-  creds := Credentials{Config: config, GrantType: "password"}
+  creds := readCredentials()
   client.Authenticate(creds)
   transfers, err := client.GetTransfers()
   assert.Nil(t, err)
@@ -81,8 +68,7 @@ func TestTransfers(t *testing.T) {
 
 func TestLimits(t *testing.T) {
   client, _ := New(SANDBOX)
-  config := readConfig()
-  creds := Credentials{Config: config, GrantType: "password"}
+  creds := readCredentials()
   client.Authenticate(creds)
   limits, err := client.GetLimits()
   assert.Nil(t, err)
@@ -104,8 +90,7 @@ func TestLimitsAuthFailed(t *testing.T) {
 
 func TestRecipients(t *testing.T) {
   client, _ := New(SANDBOX)
-  config := readConfig()
-  creds := Credentials{Config: config, GrantType: "password"}
+  creds := readCredentials()
   client.Authenticate(creds)
   recipients, err := client.GetRecipients()
   assert.Nil(t, err)
@@ -114,22 +99,29 @@ func TestRecipients(t *testing.T) {
 
 func TestRefreshToken(t *testing.T) {
   client, _ := New(SANDBOX)
-  config := readConfig()
-  creds := Credentials{Config: config, GrantType: "password"}
-  token, err := client.GetToken(creds)
-  newToken, err := client.RefreshToken(creds, token)
+  creds := readCredentials()
+  token, err := client.Authenticate(creds)
+  newToken, err := client.RefreshToken()
   assert.Nil(t, err)
   assert.NotNil(t, newToken)
   assert.NotNil(t, newToken.AccessToken)
   assert.NotEqual(t, token.AccessToken, newToken.AccessToken)
 }
 
-func readConfig() Config {
+func TestRefreshTokenNoAuth(t *testing.T) {
+  client, _ := New(SANDBOX)
+  newToken, err := client.RefreshToken()
+  assert.NotNil(t, err)
+  fmt.Println(err)
+  assert.Equal(t, newToken, (Token{}))
+}
+
+func readCredentials() LoginCredentials {
   data, err := ioutil.ReadFile("./test_sandbox.conf")
   if err != nil {
     panic(err)
   } else {
-    config := Config{}
+    config := LoginCredentials{}
     err := json.Unmarshal(data, &config)
     if err != nil {
       panic(err)
