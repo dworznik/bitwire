@@ -6,24 +6,21 @@ import (
   "fmt"
   "github.com/dworznik/bitwire"
   "github.com/dworznik/cli"
+  "github.com/olekukonko/tablewriter"
   "io/ioutil"
   "os"
   "path/filepath"
   "strings"
 )
 
+func printfErr(format string, v ...interface{}) (n int, err error) {
+  return fmt.Fprintf(os.Stderr, format, v...)
+}
+
 const (
   ConfDir         = ".bitwire"
   ConfPath        = ConfDir + "/" + "production.json"
   SandboxConfPath = ConfDir + "/" + "sandbox.json"
-)
-
-type format string
-
-const (
-  TEXT format = "text"
-  JSON format = "json"
-  CSV  format = "csv"
 )
 
 func configDir() string {
@@ -51,7 +48,7 @@ func readStdin(reader *bufio.Reader) (string, error) {
 }
 
 func config(mode bitwire.Mode) (bitwire.Config, bitwire.LoginCredentials, error) {
-  fmt.Printf("Configuring bitwire in %s mode\n", mode)
+  printfErr("Configuring bitwire in %s mode\n", mode)
   reader := bufio.NewReader(os.Stdin)
   fmt.Print("Username: ")
   username, _ := readStdin(reader)
@@ -94,7 +91,7 @@ func writeConfig(config bitwire.Config, mode bitwire.Mode) error {
       return cli.NewExitError(err.Error(), 1)
     }
   }
-  file, err := os.OpenFile(configPath, os.O_RDWR|os.O_CREATE, 0666)
+  file, err := os.OpenFile(configPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
   if err != nil {
     return cli.NewExitError(err.Error(), 1)
   } else {
@@ -118,28 +115,103 @@ func formatJson(v interface{}) (string, error) {
   }
 }
 
-func printOut(v interface{}, format string) error {
-  if format == "json" {
-    output, err := formatJson(v)
+var tableTransferHeader = []string{"ID", "Recipient", "Sent (BTC)", "Received", "Date", "Status"}
+
+func tableTransferData(transfer bitwire.Transfer) []string {
+  return []string{transfer.Id,
+    transfer.Recipient.Name,
+    fmt.Sprintf("%s %s", transfer.Amount, transfer.Currency),
+    fmt.Sprintf("%s %s", transfer.Recipient.Amount, transfer.Recipient.Currency),
+    transfer.Date, transfer.Status}
+}
+
+var tableRecipientHeader = []string{"ID", "Name", "Email", "Bank", "Account"}
+
+func tableRecipientData(recipient bitwire.Recipient) []string {
+  return []string{fmt.Sprintf("%d", recipient.Id), recipient.Name, recipient.Email, recipient.Bank.DisplayName, recipient.Bank.AccountNumber}
+}
+
+var tableBankHeader = []string{"ID", "Number", "Name"}
+
+func tableBankData(bank bitwire.Bank) []string {
+  return []string{fmt.Sprintf("%d", bank.Id), bank.Number, bank.Name}
+}
+
+func tableLimitData(limit bitwire.Limits) []string {
+  return nil
+}
+
+var tableRatesHeader = []string{"", "Rate"}
+
+var tableLimitsHeader = []string{"Limit", "Value (BTW)"}
+
+var tableTransferLimitsHeader = []string{"Limit", "Value"}
+
+func printOut(obj interface{}, json bool) error {
+  if json {
+    output, err := formatJson(obj)
     if err != nil {
       return cli.NewExitError(err.Error(), 10)
     } else {
       fmt.Println(output)
     }
   } else {
-    return cli.NewExitError("Unknow format", 10)
+    table := tablewriter.NewWriter(os.Stdout)
+    switch v := obj.(type) {
+    case []bitwire.Transfer:
+      table.SetHeader(tableTransferHeader)
+      for i := range v {
+        table.Append(tableTransferData(v[i]))
+      }
+    case []bitwire.Recipient:
+      table.SetHeader(tableRecipientHeader)
+      for i := range v {
+        table.Append(tableRecipientData(v[i]))
+      }
+    case []bitwire.Bank:
+      table.SetHeader(tableBankHeader)
+      for i := range v {
+        table.Append(tableBankData(v[i]))
+      }
+    case bitwire.AllRates:
+      table.SetHeader(tableRatesHeader)
+      for k, v := range v.BTC {
+        table.Append([]string{k, v})
+      }
+      table.Append([]string{"", ""})
+      for k, v := range v.FX {
+        table.Append([]string{k, v})
+      }
+    case bitwire.Limits:
+      table.SetHeader(tableLimitsHeader)
+      table.Append([]string{"Daily used", v.KRW.Daily.Used})
+      table.Append([]string{"Daily left", v.KRW.Daily.Left})
+      table.Append([]string{"Daily limit", v.KRW.Daily.Limit})
+      table.Append([]string{"Weekly used", v.KRW.Weekly.Used})
+      table.Append([]string{"Weekly left", v.KRW.Weekly.Left})
+      table.Append([]string{"Weekly limit", v.KRW.Weekly.Limit})
+      table.Render()
+
+      table = tablewriter.NewWriter(os.Stdout)
+      table.SetHeader(tableTransferLimitsHeader)
+      table.Append([]string{"Pending transfers used", fmt.Sprintf("%d", v.Transfers.Pending.Total.Used)})
+      table.Append([]string{"Pending transfers limit", fmt.Sprintf("%d", v.Transfers.Pending.Total.Limit)})
+      table.Append([]string{"Daily transfers used", fmt.Sprintf("%d", v.Transfers.Completed.Daily.Used)})
+      table.Append([]string{"Daily transfers limit", fmt.Sprintf("%d", v.Transfers.Completed.Daily.Limit)})
+    }
+
+    table.Render()
   }
   return nil
 }
 
 func main() {
   var exit error
-
   defer func() {
     if exit != nil {
-      fmt.Fprintln(os.Stderr, exit)
+      printfErr("%s\n", exit)
       if exit.Error() == "Unauthorized: Token expired." {
-        fmt.Fprintln(os.Stderr, "API token could not been refreshed. Run bitwire config again")
+        printfErr("API token could not been refreshed. Run bitwire config again\n")
       }
       os.Exit(1)
     }
@@ -148,7 +220,7 @@ func main() {
   authCommands := map[string]bool{"transfers": true, "limits": true, "recipients": true}
   sandbox := false
   mode := bitwire.PRODUCTION
-  var format string
+  var json = false
 
   var confErr error
   var conf bitwire.Config    // Set in app.Before()
@@ -156,7 +228,7 @@ func main() {
 
   app := cli.NewApp()
   app.Name = "bitwire"
-  app.Version = "0.0.1"
+  app.Version = "0.0.2"
   app.Usage = "Bitwire command line interface"
   app.Flags = []cli.Flag{
     cli.BoolFlag{
@@ -164,11 +236,10 @@ func main() {
       Usage:       "run in sandbox mode",
       Destination: &sandbox,
     },
-    cli.StringFlag{
-      Name:        "format, f",
-      Usage:       "Output format: json, text",
-      Value:       "json",
-      Destination: &format,
+    cli.BoolFlag{
+      Name:        "json, j",
+      Usage:       "print out JSON",
+      Destination: &json,
     },
   }
 
@@ -205,9 +276,9 @@ func main() {
   app.Before = func(c *cli.Context) error { // Read config from the file before running a command
     if sandbox {
       mode = bitwire.SANDBOX
-      fmt.Println("Running in sandbox mode")
+      printfErr("Running in sandbox mode\n")
     } else {
-      fmt.Println("Running in production mode")
+      printfErr("Running in production mode\n")
     }
     conf, confErr = readConfig(mode)
     return nil
@@ -216,7 +287,7 @@ func main() {
   app.After = func(c *cli.Context) error {
     if client != nil {
       if client.Token().AccessToken != "" && conf.Token.AccessToken != client.Token().AccessToken { // Update token in the config file
-        conf.Token = client.Token()
+        conf = bitwire.Config{bitwire.Credentials{conf.ClientId, conf.ClientSecret, conf.GrantType}, client.Token()}
         return writeConfig(conf, mode)
       }
     }
@@ -255,7 +326,7 @@ func main() {
           return err
         } else {
           conf.Token = token
-          defer fmt.Println("Configuration saved")
+          defer printfErr("Configuration saved\n")
           return writeConfig(conf, mode)
         }
       },
@@ -272,7 +343,7 @@ func main() {
           if exit = err; err != nil {
             return err
           } else {
-            printOut(rates, format)
+            printOut(rates, json)
             return nil
           }
         }
@@ -290,7 +361,7 @@ func main() {
           if exit = err; err != nil {
             return err
           } else {
-            printOut(banks, format)
+            printOut(banks, json)
             return nil
           }
         }
@@ -308,7 +379,7 @@ func main() {
           if exit = err; err != nil {
             return err
           } else {
-            printOut(recipients, format)
+            printOut(recipients, json)
             return nil
           }
         }
@@ -326,7 +397,7 @@ func main() {
           if exit = err; err != nil {
             return err
           } else {
-            printOut(txs, format)
+            printOut(txs, json)
             return nil
           }
         }
@@ -344,7 +415,7 @@ func main() {
           if exit = err; err != nil {
             return err
           } else {
-            printOut(limits, format)
+            printOut(limits, json)
             return nil
           }
         }
