@@ -71,7 +71,7 @@ bitwire banks
 Displaying account's limits
 ```
 bitwire limits
-``
+```
 
 
 ### Working with JSON output in the shell
