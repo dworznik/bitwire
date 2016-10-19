@@ -63,6 +63,11 @@ type RecipientsRes struct {
   Recipients []Recipient `json:"recipients"`
 }
 
+type TransferRes struct {
+  Res
+  Transfer Transfer
+}
+
 type TransfersRes struct {
   Res
   Transfers []Transfer
@@ -74,11 +79,19 @@ type Transfer struct {
   Type      string            `json:"type"`
   Memo      string            `json:"memo"`
   Amount    string            `json:"amount"`
-  Currency  string            `json:"currecny"`
+  Currency  string            `json:"currency"`
   Status    string            `json:"status"`
   Date      string            `json:"date"`
   BTC       BTC               `json:"btc"`
   Recipient TransferRecipient `json:"recipient"`
+}
+
+type CreateTransfer struct {
+  Amount      string `json:"amount"`
+  Currency    string `json:"currency"`
+  RecipientId int    `json:"recipient_id"`
+  Memo        string `json:"memo"`
+  Type        string `json:"type"`
 }
 
 type Sender struct {
@@ -200,8 +213,9 @@ type Client struct {
 type Method string
 
 const (
-  GET  Method = "GET"
-  POST Method = "POST"
+  GET       Method = "GET"
+  POST      Method = "POST"
+  JSON_POST Method = "JSON_POST"
 )
 
 func New(mode Mode) (*Client, error) {
@@ -267,6 +281,8 @@ func callApi(method Method, path string, params interface{}, c *Client, auth boo
   errorRes := new(ErrorRes)
   switch method {
   case POST:
+    fallthrough
+  case JSON_POST:
     req = c.http().Post(path)
   default:
     req = c.http().Get(path)
@@ -279,7 +295,15 @@ func callApi(method Method, path string, params interface{}, c *Client, auth boo
     req.Set("Authorization", "Bearer "+c.token.AccessToken)
   }
   if params != nil {
-    req = req.BodyForm(params)
+    switch method {
+    case JSON_POST:
+      req = req.BodyJSON(params)
+    case POST:
+      req = req.BodyForm(params)
+    default:
+      req.QueryStruct(params)
+    }
+
   }
 
   _, httpErr := req.Receive(res, errorRes)
@@ -349,6 +373,26 @@ func (c *Client) GetTransfers() ([]Transfer, error) {
     return nil, err
   } else {
     return transfersRes.Transfers, nil
+  }
+}
+
+func (c *Client) GetTransfer(id string) (Transfer, error) {
+  transferRes := new(TransferRes)
+  err := callApi(GET, "transfers/"+id, nil, c, true, transferRes)
+  if err != nil {
+    return Transfer{}, err
+  } else {
+    return transferRes.Transfer, nil
+  }
+}
+
+func (c *Client) CreateTransfer(transfer CreateTransfer) (Transfer, error) {
+  transferRes := new(TransferRes)
+  err := callApi(JSON_POST, "transfers", transfer, c, true, transferRes)
+  if err != nil {
+    return Transfer{}, err
+  } else {
+    return transferRes.Transfer, nil
   }
 }
 

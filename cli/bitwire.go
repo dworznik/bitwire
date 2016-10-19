@@ -3,13 +3,16 @@ package main
 import (
   "bufio"
   "encoding/json"
+  "errors"
   "fmt"
   "github.com/dworznik/bitwire"
   "github.com/dworznik/cli"
   "github.com/olekukonko/tablewriter"
+  qrcode "github.com/skip2/go-qrcode"
   "io/ioutil"
   "os"
   "path/filepath"
+  "strconv"
   "strings"
 )
 
@@ -18,10 +21,41 @@ func printfErr(format string, v ...interface{}) (n int, err error) {
 }
 
 const (
+  BLACK = "\033[40m  \033[0m"
+  WHITE = "\033[47m  \033[0m"
+)
+
+const (
   ConfDir         = ".bitwire"
   ConfPath        = ConfDir + "/" + "production.json"
   SandboxConfPath = ConfDir + "/" + "sandbox.json"
 )
+
+func printQr(data string) (err error) {
+  qr, err := qrcode.New(data, qrcode.Medium)
+
+  if err != nil {
+    return err
+  }
+
+  clip := 3
+  bitmap := qr.Bitmap()
+  for i, row := range bitmap {
+    if i >= clip && i < len(bitmap)-clip {
+      for j, cell := range row {
+        if j >= clip && j < len(row)-clip {
+          if cell {
+            fmt.Print(BLACK)
+          } else {
+            fmt.Print(WHITE)
+          }
+        }
+      }
+    }
+    fmt.Println()
+  }
+  return nil
+}
 
 func configDir() string {
   return filepath.FromSlash(os.Getenv("HOME") + "/" + ConfDir)
@@ -115,14 +149,14 @@ func formatJson(v interface{}) (string, error) {
   }
 }
 
-var tableTransferHeader = []string{"ID", "Recipient", "Sent (BTC)", "Received", "Date", "Status"}
+var tableTransferHeader = []string{"ID", "Recipient", "Sent (BTC)", "Received", "Date", "Status", "Pay address"}
 
 func tableTransferData(transfer bitwire.Transfer) []string {
   return []string{transfer.Id,
     transfer.Recipient.Name,
     fmt.Sprintf("%s %s", transfer.Amount, transfer.Currency),
     fmt.Sprintf("%s %s", transfer.Recipient.Amount, transfer.Recipient.Currency),
-    transfer.Date, transfer.Status}
+    transfer.Date, transfer.Status, transfer.BTC.Address}
 }
 
 var tableRecipientHeader = []string{"ID", "Name", "Email", "Bank", "Account"}
@@ -163,6 +197,10 @@ func printOut(obj interface{}, json bool) error {
       for i := range v {
         table.Append(tableTransferData(v[i]))
       }
+    case bitwire.Transfer:
+      table.SetHeader(tableTransferHeader)
+      table.Append(tableTransferData(v))
+      printQr(v.BTC.Link)
     case []bitwire.Recipient:
       table.SetHeader(tableRecipientHeader)
       for i := range v {
@@ -217,7 +255,7 @@ func main() {
     }
   }()
 
-  authCommands := map[string]bool{"transfers": true, "limits": true, "recipients": true}
+  authCommands := map[string]bool{"transfers": true, "transfer": true, "limits": true, "recipients": true, "tr": true, "create": true, "list": true, "show": true}
   sandbox := false
   mode := bitwire.PRODUCTION
   var json = false
@@ -386,21 +424,76 @@ func main() {
       },
     },
     {
-      Name:  "transfers",
-      Usage: "list transfers",
-      Action: func(c *cli.Context) error {
-        client, err := newClient(c.Command.Name)
-        if exit = err; err != nil {
-          return err
-        } else {
-          txs, err := client.GetTransfers()
-          if exit = err; err != nil {
-            return err
-          } else {
-            printOut(txs, json)
-            return nil
-          }
-        }
+      Name:  "transfer",
+      Usage: "transfer operations",
+      Subcommands: []cli.Command{
+        {
+          Name:  "list",
+          Usage: "list transfers",
+          Action: func(c *cli.Context) error {
+            client, err := newClient(c.Command.Name)
+            if exit = err; err != nil {
+              return err
+            } else {
+              txs, err := client.GetTransfers()
+              if exit = err; err != nil {
+                return err
+              } else {
+                printOut(txs, json)
+                return nil
+              }
+            }
+          },
+        },
+        {
+          Name:  "show",
+          Usage: "show transfer",
+          Action: func(c *cli.Context) error {
+            client, err := newClient(c.Command.Name)
+            if exit = err; err != nil {
+              return err
+            } else {
+              id := c.Args().Get(0)
+              tx, err := client.GetTransfer(id)
+              if exit = err; err != nil {
+                return err
+              } else {
+                printOut(tx, json)
+                return nil
+              }
+            }
+          },
+        },
+        {
+          Name:  "create",
+          Usage: "create transfer",
+          Action: func(c *cli.Context) error {
+            client, err := newClient(c.Command.Name)
+            if exit = err; err != nil {
+              return err
+            } else {
+              if c.NArg() < 2 {
+                exit = errors.New("Missing argument\nUsage: transfer create recipient_id amount")
+                return exit
+              }
+              args := c.Args()
+              amount := args.Get(0)
+              recId, rErr := strconv.Atoi(args.Get(1))
+              if rErr != nil {
+                exit = errors.New("Invalid recipient id value")
+                return exit
+              }
+              trans := bitwire.CreateTransfer{Amount: amount, Currency: "KRW", RecipientId: recId, Type: "btc_to_bank"}
+              tx, err := client.CreateTransfer(trans)
+              if exit = err; err != nil {
+                return err
+              } else {
+                printOut(tx, json)
+                return nil
+              }
+            }
+          },
+        },
       },
     },
     {
