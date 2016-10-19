@@ -408,21 +408,27 @@ func main() {
       },
     },
     {
-      Name:  "recipients",
-      Usage: "list recipients",
-      Action: func(c *cli.Context) error {
-        client, err := newClient(c.Command.Name)
-        if exit = err; err != nil {
-          return err
-        } else {
-          recipients, err := client.GetRecipients()
-          if exit = err; err != nil {
-            return err
-          } else {
-            printOut(recipients, json)
-            return nil
-          }
-        }
+      Name:  "recipient",
+      Usage: "recipient operations",
+      Subcommands: []cli.Command{
+        {
+          Name:  "list",
+          Usage: "list recipients",
+          Action: func(c *cli.Context) error {
+            client, err := newClient(c.Command.Name)
+            if exit = err; err != nil {
+              return err
+            } else {
+              recipients, err := client.GetRecipients()
+              if exit = err; err != nil {
+                return err
+              } else {
+                printOut(recipients, json)
+                return nil
+              }
+            }
+          },
+        },
       },
     },
     {
