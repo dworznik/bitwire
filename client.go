@@ -216,6 +216,7 @@ const (
   GET       Method = "GET"
   POST      Method = "POST"
   JSON_POST Method = "JSON_POST"
+  DELETE    Method = "DELETE"
 )
 
 func New(mode Mode) (*Client, error) {
@@ -284,6 +285,8 @@ func callApi(method Method, path string, params interface{}, c *Client, auth boo
     fallthrough
   case JSON_POST:
     req = c.http().Post(path)
+  case DELETE:
+    req = c.http().Delete(path)
   default:
     req = c.http().Get(path)
   }
@@ -389,6 +392,16 @@ func (c *Client) GetTransfer(id string) (Transfer, error) {
 func (c *Client) CreateTransfer(transfer CreateTransfer) (Transfer, error) {
   transferRes := new(TransferRes)
   err := callApi(JSON_POST, "transfers", transfer, c, true, transferRes)
+  if err != nil {
+    return Transfer{}, err
+  } else {
+    return transferRes.Transfer, nil
+  }
+}
+
+func (c *Client) CancelTransfer(id string) (Transfer, error) {
+  transferRes := new(TransferRes)
+  err := callApi(DELETE, "transfers/"+id, nil, c, true, transferRes)
   if err != nil {
     return Transfer{}, err
   } else {

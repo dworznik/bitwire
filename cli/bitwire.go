@@ -255,7 +255,9 @@ func main() {
     }
   }()
 
-  authCommands := map[string]bool{"transfers": true, "transfer": true, "limits": true, "recipients": true, "tr": true, "create": true, "list": true, "show": true}
+  authCommands := map[string]bool{"transfers": true, "transfer": true,
+    "limits": true, "recipients": true, "tr": true, "create": true,
+    "cancel": true, "list": true, "show": true}
   sandbox := false
   mode := bitwire.PRODUCTION
   var json = false
@@ -485,6 +487,25 @@ func main() {
               }
               trans := bitwire.CreateTransfer{Amount: amount, Currency: "KRW", RecipientId: recId, Type: "btc_to_bank"}
               tx, err := client.CreateTransfer(trans)
+              if exit = err; err != nil {
+                return err
+              } else {
+                printOut(tx, json)
+                return nil
+              }
+            }
+          },
+        },
+        {
+          Name:  "cancel",
+          Usage: "cancel transfer",
+          Action: func(c *cli.Context) error {
+            client, err := newClient(c.Command.Name)
+            if exit = err; err != nil {
+              return err
+            } else {
+              id := c.Args().Get(0)
+              tx, err := client.CancelTransfer(id)
               if exit = err; err != nil {
                 return err
               } else {
