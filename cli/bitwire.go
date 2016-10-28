@@ -16,7 +16,7 @@ import (
   "strings"
 )
 
-func printfErr(format string, v ...interface{}) (n int, err error) {
+func printfErr(format string, v ...interface{}) (int, error) {
   return fmt.Fprintf(os.Stderr, format, v...)
 }
 
@@ -31,7 +31,7 @@ const (
   SandboxConfPath = ConfDir + "/" + "sandbox.json"
 )
 
-func printQr(data string) (err error) {
+func printQr(data string) error {
   qr, err := qrcode.New(data, qrcode.Medium)
 
   if err != nil {
@@ -191,6 +191,7 @@ func printOut(obj interface{}, json bool) error {
     }
   } else {
     table := tablewriter.NewWriter(os.Stdout)
+    var qrLink string
     switch v := obj.(type) {
     case []bitwire.Transfer:
       table.SetHeader(tableTransferHeader)
@@ -198,9 +199,19 @@ func printOut(obj interface{}, json bool) error {
         table.Append(tableTransferData(v[i]))
       }
     case bitwire.Transfer:
-      table.SetHeader(tableTransferHeader)
-      table.Append(tableTransferData(v))
-      printQr(v.BTC.Link)
+      // table.SetHeader([]string{"", ""})
+      table.SetRowLine(true)
+      table.SetAlignment(tablewriter.ALIGN_LEFT)
+      table.Append([]string{"ID", v.Id})
+      table.Append([]string{"Recipient", v.Recipient.Name})
+      table.Append([]string{"Bank", v.Recipient.Bank.DisplayName})
+      table.Append([]string{"Account Number", v.Recipient.Bank.AccountNumber})
+      table.Append([]string{"Received", v.Recipient.Amount})
+      table.Append([]string{"Date", v.Date})
+      table.Append([]string{"Status", v.Status})
+      table.Append([]string{"Pay Address", v.BTC.Address})
+      table.Append([]string{"Pay URL", v.BTC.Link})
+      qrLink = v.BTC.Link
     case []bitwire.Recipient:
       table.SetHeader(tableRecipientHeader)
       for i := range v {
@@ -239,6 +250,7 @@ func printOut(obj interface{}, json bool) error {
     }
 
     table.Render()
+    printQr(qrLink)
   }
   return nil
 }
