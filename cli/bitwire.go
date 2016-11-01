@@ -149,14 +149,56 @@ func formatJson(v interface{}) (string, error) {
   }
 }
 
-var tableTransferHeader = []string{"ID", "Recipient", "Sent (BTC)", "Received", "Date", "Status", "Pay address"}
+var defaultFields = []string{"id", "recipient", "sent", "received", "date", "status", "address"}
+var fieldHeaders = map[string]string{"id": "ID", "recipient": "Recipient",
+  "sent": "Sent (BTC)", "received": "Received", "date": "Date", "status": "Status",
+  "address": "Pay address", "link": "Pay link", "account": "Account", "bank": "Bank"}
 
-func tableTransferData(transfer bitwire.Transfer) []string {
-  return []string{transfer.Id,
-    transfer.Recipient.Name,
-    fmt.Sprintf("%s %s", transfer.Amount, transfer.Currency),
-    fmt.Sprintf("%s %s", transfer.Recipient.Amount, transfer.Recipient.Currency),
-    transfer.Date, transfer.Status, transfer.BTC.Address}
+func validateTableTransferHeader(fields []string) ([]string, []string) {
+  var headers []string
+  var validFields []string
+
+  for _, f := range fields {
+    if h := fieldHeaders[f]; h != "" {
+      validFields = append(validFields, f)
+      headers = append(headers, h)
+    }
+  }
+  return validFields, headers
+}
+
+func fieldData(transfer bitwire.Transfer, field string) string {
+  switch field {
+  case "id":
+    return transfer.Id
+  case "recipient":
+    return transfer.Recipient.Name
+  case "sent":
+    return fmt.Sprintf("%s %s", transfer.Amount, transfer.Currency)
+  case "received":
+    return fmt.Sprintf("%s %s", transfer.Recipient.Amount, transfer.Recipient.Currency)
+  case "date":
+    return transfer.Date
+  case "status":
+    return transfer.Status
+  case "address":
+    return transfer.BTC.Address
+  case "link":
+    return transfer.BTC.Link
+  case "bank":
+    return transfer.Recipient.Bank.DisplayName
+  case "account":
+    return transfer.Recipient.Bank.AccountNumber
+  }
+  return ""
+}
+
+func tableTransferData(transfer bitwire.Transfer, fields []string) []string {
+  var values []string
+  for _, f := range fields {
+    values = append(values, fieldData(transfer, f))
+  }
+  return values
 }
 
 var tableRecipientHeader = []string{"ID", "Name", "Email", "Bank", "Account"}
@@ -171,15 +213,31 @@ func tableBankData(bank bitwire.Bank) []string {
   return []string{fmt.Sprintf("%d", bank.Id), bank.Number, bank.Name}
 }
 
-func tableLimitData(limit bitwire.Limits) []string {
-  return nil
-}
-
 var tableRatesHeader = []string{"", "Rate"}
 
 var tableLimitsHeader = []string{"Limit", "Value (BTW)"}
 
 var tableTransferLimitsHeader = []string{"Limit", "Value"}
+
+func printOutTxs(txs []bitwire.Transfer, fields []string, json bool) error {
+  if json {
+    output, err := formatJson(txs)
+    if err != nil {
+      return cli.NewExitError(err.Error(), 10)
+    } else {
+      fmt.Println(output)
+    }
+  } else {
+    table := tablewriter.NewWriter(os.Stdout)
+    validFields, header := validateTableTransferHeader(fields)
+    table.SetHeader(header)
+    for i := range txs {
+      table.Append(tableTransferData(txs[i], validFields))
+    }
+    table.Render()
+  }
+  return nil
+}
 
 func printOut(obj interface{}, json bool) error {
   if json {
@@ -193,11 +251,6 @@ func printOut(obj interface{}, json bool) error {
     table := tablewriter.NewWriter(os.Stdout)
     var qrLink string
     switch v := obj.(type) {
-    case []bitwire.Transfer:
-      table.SetHeader(tableTransferHeader)
-      for i := range v {
-        table.Append(tableTransferData(v[i]))
-      }
     case bitwire.Transfer:
       // table.SetHeader([]string{"", ""})
       table.SetRowLine(true)
@@ -451,6 +504,10 @@ func main() {
           Name:  "list",
           Usage: "list transfers",
           Action: func(c *cli.Context) error {
+            fields := c.StringSlice("f")
+            if len(fields) == 0 {
+              fields = defaultFields
+            }
             client, err := newClient(c.Command.Name)
             if exit = err; err != nil {
               return err
@@ -459,10 +516,16 @@ func main() {
               if exit = err; err != nil {
                 return err
               } else {
-                printOut(txs, json)
+                printOutTxs(txs, fields, json)
                 return nil
               }
             }
+          },
+          Flags: []cli.Flag{
+            cli.StringSliceFlag{
+              Name:  "f",
+              Usage: "Show selected fields only: id, recipient, sent, received, date, status, address, link, account, bank",
+            },
           },
         },
         {
