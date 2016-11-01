@@ -333,7 +333,7 @@ func main() {
 
   app := cli.NewApp()
   app.Name = "bitwire"
-  app.Version = "0.0.2"
+  app.Version = "0.0.3"
   app.Usage = "Bitwire command line interface"
   app.Flags = []cli.Flag{
     cli.BoolFlag{
