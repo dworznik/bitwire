@@ -1,0 +1,33 @@
+hash: 8bdc8d6c9ad3ba66b72c0975bba858424dce4c823082a1e2bbcee48694a89b01
+updated: 2017-01-19T01:04:44.367228894+07:00
+imports:
+- name: github.com/dghubble/sling
+  version: eb56e89ac5088bebb12eef3cb4b293300f43608b
+- name: github.com/dworznik/cli
+  version: 01857ac33766ce0c93856370626f9799281c14f4
+- name: github.com/google/go-querystring
+  version: 53e6ce116135b80d037921a7fdd5138cf32d7a8a
+  subpackages:
+  - query
+- name: github.com/mattn/go-runewidth
+  version: 737072b4e32b7a5018b4a7125da8d12de90e8045
+- name: github.com/olekukonko/tablewriter
+  version: 44e365d423f4f06769182abfeeae2b91be9d529b
+- name: github.com/skip2/go-qrcode
+  version: cf02323edc040f5263d08b45a60bc8abdc3bde18
+  subpackages:
+  - bitset
+  - reedsolomon
+testImports:
+- name: github.com/davecgh/go-spew
+  version: 6d212800a42e8ab5c146b8ace3490ee17e5225f9
+  subpackages:
+  - spew
+- name: github.com/pmezard/go-difflib
+  version: d8ed2627bdf02c080bf22230dbb337003b7aba2d
+  subpackages:
+  - difflib
+- name: github.com/stretchr/testify
+  version: 69483b4bd14f5845b5a1e55bca19e954e827f1d0
+  subpackages:
+  - assert

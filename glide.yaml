@@ -1,0 +1,13 @@
+package: github.com/dworznik/bitwire
+import:
+- package: github.com/dghubble/sling
+  version: ^1.1.0
+- package: github.com/dworznik/cli
+  version: ^1.17.0
+- package: github.com/olekukonko/tablewriter
+- package: github.com/skip2/go-qrcode
+testImport:
+- package: github.com/stretchr/testify
+  version: ^1.1.4
+  subpackages:
+  - assert
