@@ -14,6 +14,8 @@ To install bitwire, run:
 
 ```
 go get github.com/dworznik/bitwire
+cd $GOPATH/github.com/dworznik/bitwire
+make
 ```
 
 
@@ -80,7 +82,7 @@ bitwire limits
 Add `-j` switch, to get the JSON API response object.
 
 ```
-bitwire -j  transfers'
+bitwire -j  transfers
 ```
 
 
